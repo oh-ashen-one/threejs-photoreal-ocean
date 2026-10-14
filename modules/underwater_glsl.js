@@ -253,95 +253,35 @@ export const UNDERWATER_GLSL = /* glsl */ `
   }
 
   // --------------------------------------------------------------------------
-  // Overhead Ceiling Wave Field & Refracted Sunset Sky Helper for Snell's Window
+  // Overhead 3D Multi-Swell Wave Ceiling for Looking Up Underwater
   // --------------------------------------------------------------------------
   float uwEvalCeilingWave(vec2 xz, float time, float chop) {
     float cScale = max(0.35, chop);
-    float swell1 = sin(xz.y * 1.55 + xz.x * 0.32 - time * 2.1) * 0.095;
-    float swell2 = cos(xz.x * 1.75 - xz.y * 1.05 - time * 1.8) * 0.058;
+    // Primary rolling ocean swells overhead
+    float swell1 = sin(xz.y * 1.35 + xz.x * 0.28 - time * 1.95) * 0.145;
+    float swell2 = cos(xz.x * 1.55 - xz.y * 0.95 - time * 1.65) * 0.085;
 
-    float med1 = sin(xz.y * 4.2 - time * 2.4 + sin(xz.x * 2.6) * 1.15) * 0.040;
-    float med2 = cos(xz.x * 3.8 + xz.y * 2.6 - time * 2.0) * 0.030;
-    float med3 = sin((xz.x * 0.85 - xz.y * 1.35) * 6.2 + time * 2.8) * 0.018;
-    float med4 = (uwFbm2D(xz * 2.6 - vec2(0.0, time * 1.1)) - 0.5) * 0.042;
+    // Medium wind-chop waves & organic FBM ripples
+    float med1 = sin(xz.y * 3.8 - time * 2.3 + sin(xz.x * 2.4) * 1.15) * 0.048;
+    float med2 = cos(xz.x * 3.5 + xz.y * 2.4 - time * 1.9) * 0.036;
+    float med3 = sin((xz.x * 0.85 - xz.y * 1.35) * 5.8 + time * 2.6) * 0.022;
+    float med4 = (uwFbm2D(xz * 2.4 - vec2(0.0, time * 1.05)) - 0.5) * 0.052;
 
     return (swell1 + swell2 + med1 + med2 + med3 + med4) * cScale;
   }
 
   vec3 uwGetCeilingNormal(vec2 xz, float time, float chop) {
-    float eps = 0.040;
+    float eps = 0.038;
     float h0 = uwEvalCeilingWave(xz, time, chop);
     float hX = uwEvalCeilingWave(xz + vec2(eps, 0.0), time, chop);
     float hZ = uwEvalCeilingWave(xz + vec2(0.0, eps), time, chop);
     return normalize(vec3(h0 - hX, eps, h0 - hZ));
   }
 
-  // Smooth, Sweeping Atmospheric Sunset Sky inside Snell's Window (ZERO high-frequency zebra stripes!)
-  // Matches ref_v2_hyperreal_underwater_snell.jpg: deep dusky indigo-violet on the upper-right,
-  // glowing molten orange-coral on the lower-left, with 1-2 broad, soft swept cloud bands!
-  vec3 uwEvalSnellSky(vec2 diskUV, float time, float twilight, vec3 sunDir, vec3 sunCol) {
-    // Diagonal orientation from lower-left (warm coral-orange) to upper-right (dusky violet-indigo)
-    vec2 rotUV = vec2(
-      diskUV.x * 0.84 - diskUV.y * 0.54,
-      diskUV.x * 0.54 + diskUV.y * 0.84
-    );
-
-    // Smooth atmospheric sky gradient across the refracted dome
-    float skyGrad = clamp(rotUV.y * 0.52 + 0.50, 0.0, 1.0);
-    vec3 lowMoltenCoral = vec3(1.02, 0.36, 0.12);
-    vec3 midRoseCrimson = vec3(0.52, 0.20, 0.22);
-    vec3 upperDuskIndigo = vec3(0.20, 0.15, 0.26);
-
-    vec3 skyBg = mix(lowMoltenCoral, midRoseCrimson, smoothstep(0.0, 0.56, skyGrad));
-    skyBg = mix(skyBg, upperDuskIndigo, smoothstep(0.42, 1.0, skyGrad));
-
-    // Low-frequency, broad sweeping sunset cloud bands (2.8x lower frequency than before!)
-    vec2 cloudP = vec2(rotUV.x * 0.78 - time * 0.008, rotUV.y * 1.55);
-    float warp = uwFbm2D(cloudP * 1.15 + vec2(1.4, 3.2)) - 0.5;
-    vec2 q = cloudP + vec2(warp * 0.45, warp * 0.25);
-
-    // 1-2 broad altocumulus / cirrus bands sweeping gently across the lower-left and center
-    float broadBand1 = exp(-uwSqr((q.y + 0.18 + sin(q.x * 1.8) * 0.16) * 2.4));
-    float broadBand2 = exp(-uwSqr((q.y - 0.22 + cos(q.x * 1.5 + 1.1) * 0.14) * 2.8));
-    float wispyTex   = uwFbm5(q * vec2(1.4, 2.2) + vec2(2.1, 0.8));
-
-    float cloudDensity = clamp((broadBand1 * 0.75 + broadBand2 * 0.55) * (0.45 + 0.65 * wispyTex), 0.0, 1.0);
-
-    // Soft self-shadowing & warm molten-gold underside illumination
-    float cShadow = uwFbm5((q + vec2(-0.08, 0.12)) * vec2(1.4, 2.2) + vec2(2.1, 0.8));
-    float sunLit  = clamp((wispyTex - cShadow) * 2.6 + 0.55, 0.0, 1.15);
-
-    vec3 cloudShadowCol = vec3(0.26, 0.13, 0.18);
-    vec3 cloudCoralCol  = vec3(0.96, 0.38, 0.14);
-    vec3 cloudGoldCol   = vec3(1.22, 0.64, 0.24);
-
-    vec3 cloudCol = mix(cloudShadowCol, cloudCoralCol, smoothstep(0.15, 0.68, sunLit));
-    cloudCol = mix(cloudCol, cloudGoldCol, smoothstep(0.58, 1.10, sunLit) * (1.0 - skyGrad * 0.55));
-
-    vec3 domeCol = mix(skyBg, cloudCol, smoothstep(0.12, 0.78, cloudDensity) * 0.85);
-
-    // Subtle warm sun-crown glow at the very top edge of Snell's Window
-    float topSunDist = length(diskUV - vec2(0.02, 0.94));
-    float topSunGlow = exp(-topSunDist * 2.8);
-    domeCol += vec3(0.92, 0.58, 0.40) * uwSafePow(topSunGlow, 1.6) * 0.45;
-
-    // Subtle pinpoint twilight stars in the darker upper-right sky pocket
-    vec2 starGrid = diskUV * 44.0;
-    vec2 sId = floor(starGrid);
-    vec2 sGv = fract(starGrid) - 0.5;
-    float sProb = uwHash12(sId + 19.3);
-    float sDist = length(sGv - (uwHash22(sId) - 0.5) * 0.6);
-    float starPt = (1.0 - smoothstep(0.0, 0.08, sDist)) * step(0.94, sProb) * (1.0 - cloudDensity) * smoothstep(0.52, 0.88, skyGrad);
-    domeCol += vec3(0.90, 0.85, 0.80) * starPt * 0.65;
-
-    vec3 daySky = mix(vec3(0.18, 0.52, 0.88), vec3(0.78, 0.86, 0.95), cloudDensity * 0.7);
-    return mix(daySky, domeCol, clamp(twilight * 1.45, 0.25, 1.0));
-  }
-
   // --------------------------------------------------------------------------
   // 4. COMPLETE UNDERWATER SCENE SHADER:
-  //    - Optical Snell's Window (rEff < 1.0) with smooth atmospheric sunset clouds
-  //    - Crisp 3D TIR liquid-mercury wave ceiling all the way to rEff = 0.99 (ZERO grey halo!)
+  //    - Continuous 3D wave-refracted sky, clouds & stars overhead (NO fake oval disk!)
+  //    - Physical Fresnel transition along 3D wave facets between refracted sky & TIR
   //    - Deep peripheral abyssal-teal vignette on left/right flanks
   //    - Raymarched 3D rippled seafloor with thin chromatic RGB caustics
   //    - 3D Caustic-Modulated Volumetric God-Ray Shafts & Rising Bubble Plume
@@ -360,92 +300,87 @@ export const UNDERWATER_GLSL = /* glsl */ `
     vec3 baseUnderwater = uWaterBg;
     float sceneDist = 65.0;
 
-    vec3 snellAxis  = normalize(vec3(0.0, 0.44, -0.898));
     vec3 upOrtho    = normalize(vec3(0.0, 0.898, 0.44));
     vec3 rightOrtho = vec3(1.0, 0.0, 0.0);
 
     // ========================================================================
-    // A. OVERHEAD WATER CEILING: SNELL'S WINDOW & CRISP 3D TIR WAVE FACETS
+    // A. OVERHEAD WATER CEILING: CONTINUOUS 3D WAVE-REFRACTED SKY & TIR FACETS
+    //    (Zero artificial oval cutout, zero Mars planet circle!)
     // ========================================================================
     if (rd.y > 0.008) {
       float tSurf = max(0.25, (0.05 - ro.y) / rd.y);
       vec3 surfHit = ro + rd * tSurf;
       sceneDist = tSurf;
 
-      vec2 relXZ  = (surfHit.xz - ro.xz) / (1.0 + tSurf * 0.048);
+      vec2 relXZ  = (surfHit.xz - ro.xz) / (1.0 + tSurf * 0.042);
       vec2 waveUV = ro.xz + relXZ;
-      vec3 N_surf = uwGetCeilingNormal(waveUV * 1.15, uTime, uChop);
+      vec3 N_surf = uwGetCeilingNormal(waveUV * 1.12, uTime, uChop);
 
-      // Foreshortened oval Snell's Window coordinates
-      vec2 winCoord = vec2(dot(rd, rightOrtho) / 0.255, (dot(rd, upOrtho) + 0.012) / 0.155);
-      float rawRad  = length(winCoord);
+      // 1) TRUE WAVE-DISTORTED SKY REFRACTION OVERHEAD:
+      // Perturb the upward ray with the 3D overhead wave normal so the real sky,
+      // clouds, and stars ripple and undulate organically across the water ceiling.
+      vec3 wavePerturb = vec3(N_surf.x * 0.52, 0.0, N_surf.z * 0.52);
+      vec3 skyRay = normalize(vec3(
+        rd.x * 0.85 + wavePerturb.x,
+        max(0.068, rd.y * 0.58 + N_surf.z * 0.16),
+        rd.z * 0.85 + wavePerturb.z
+      ));
 
-      // Organic 3D wave distortion along the critical-angle rim
-      float rimWave = (N_surf.x * winCoord.x + N_surf.z * winCoord.y) * 0.055
-                    + (uwFbm2D(waveUV * 2.4 + uTime * 0.35) - 0.5) * 0.026;
-      float rEff = rawRad + rimWave;
+      vec3 dummySunDir, dummySunCol;
+      vec3 rawSkyCol = evalSkyAndClouds(skyRay, uTime, uTwilight, dummySunDir, dummySunCol);
+      rawSkyCol += evalStarfield(skyRay, uTime) * smoothstep(0.35, 0.95, uTwilight) * 0.85;
 
-      vec3 ceilingCol = uWaterBg;
+      // Filter the refracted sky through crystalline turquoise-cyan marine water absorption
+      // so it blends naturally with the ocean ceiling instead of looking like dry red air
+      float skyLuma = dot(rawSkyCol, vec3(0.299, 0.587, 0.114));
+      vec3 waterFilteredSky = mix(
+        rawSkyCol * vec3(0.52, 0.86, 0.96),
+        vec3(0.16, 0.64, 0.78) * skyLuma + rawSkyCol * vec3(0.38, 0.58, 0.65),
+        0.48
+      );
 
-      // 1) INSIDE SNELL'S WINDOW (rEff < 1.005):
-      if (rEff < 1.005) {
-        vec2 diskUV = winCoord / 0.96 + N_surf.xz * 0.024;
-        vec3 windowInterior = uwEvalSnellSky(diskUV, uTime, uTwilight, sunDir, sunCol);
+      // Add shimmering caustic ripple highlights along the refracted wave crests
+      float tirCaust = uwCausticMono(waveUV * 0.88 + N_surf.xz * 0.42, uTime * 0.85);
+      waterFilteredSky += vec3(0.22, 0.68, 0.78) * tirCaust * 0.28;
 
-        // Subtle wave-rippled meniscus right at the critical angle boundary (rEff in 0.90..0.995)
-        float rimRipple = 0.5 + 0.5 * sin(waveUV.y * 18.0 + waveUV.x * 6.0 - uTime * 2.2);
-        float rimZone = smoothstep(0.88, 0.99, rEff);
-        windowInterior *= 1.0 - rimZone * (1.0 - rimRipple) * 0.32;
+      // 2) 3D LIQUID-MERCURY TOTAL INTERNAL REFLECTION (TIR) WAVE UNDERSIDES:
+      vec3 N_under = normalize(vec3(-N_surf.x * 2.55, -N_surf.y, -N_surf.z * 2.55));
+      vec3 V_under = -rd;
 
-        float darkRimFold = exp(-uwSqr((rEff - 0.985) / 0.020));
-        ceilingCol = windowInterior * (1.0 - darkRimFold * 0.78);
-      }
+      float facetSlope = clamp(0.44 + N_surf.z * 2.95 + N_surf.x * 1.45, 0.0, 1.0);
+      vec3 deepCrestPocket = vec3(0.001, 0.014, 0.028);
+      vec3 midTealFacet    = vec3(0.006, 0.165, 0.235);
+      vec3 brightAquaFacet = mix(vec3(0.022, 0.38, 0.46), vec3(0.20, 0.74, 0.82), clamp(tirCaust * 0.80, 0.0, 1.0));
 
-      // 2) OUTSIDE SNELL'S WINDOW (rEff > 0.975):
-      // Crisp 3D TIR wave facets come all the way up to rEff = 0.99 (ZERO blurry grey arch!),
-      // with warm golden-coral sunlight modulated directly into the high-slope wave facets above the window!
-      if (rEff > 0.975) {
-        vec3 N_under = normalize(vec3(-N_surf.x * 2.55, -N_surf.y, -N_surf.z * 2.55));
-        vec3 V_under = -rd;
+      vec3 tirCeiling = mix(deepCrestPocket, midTealFacet, smoothstep(0.18, 0.56, facetSlope));
+      tirCeiling = mix(tirCeiling, brightAquaFacet, smoothstep(0.52, 0.86, facetSlope));
 
-        float tirCaust = uwCausticMono(waveUV * 0.88 + N_surf.xz * 0.42, uTime * 0.85);
+      // Warm golden-aqua sunlight transmitted through steep wave crests facing the sun
+      vec2 horizRd = rd.xz / max(1e-4, length(rd.xz));
+      float sunAlign = clamp(dot(horizRd, sunDir.xz), 0.0, 1.0);
+      float sunFacet = smoothstep(0.52, 0.88, facetSlope) * smoothstep(0.05, 0.45, rd.y) * (0.35 + 0.65 * sunAlign);
+      vec3 warmWaveGlow = mix(vec3(0.25, 0.72, 0.78), sunCol * vec3(0.72, 0.82, 0.85), 0.55);
+      tirCeiling = mix(tirCeiling, warmWaveGlow, sunFacet * 0.55);
 
-        // High-contrast 3D liquid-mercury wave pockets:
-        // Deep obsidian-teal wave crests vs glowing aquamarine-turquoise wave facets
-        float facetSlope = clamp(0.44 + N_surf.z * 2.95 + N_surf.x * 1.45, 0.0, 1.0);
-        vec3 deepCrestPocket = vec3(0.001, 0.014, 0.028);
-        vec3 midTealFacet    = vec3(0.006, 0.165, 0.235);
-        vec3 brightAquaFacet = mix(vec3(0.022, 0.38, 0.46), vec3(0.20, 0.74, 0.82), clamp(tirCaust * 0.80, 0.0, 1.0));
+      // Glossy silver-cyan specular ridge glints on the 3D wave undersides
+      vec3 L_up = normalize(vec3(0.0, -0.80, 0.60));
+      float ridgeSpec = uwSafePow(max(0.0, dot(N_under, normalize(L_up + V_under))), 38.0) * (0.35 + 0.65 * tirCaust);
+      tirCeiling += vec3(0.42, 0.82, 0.88) * ridgeSpec * 0.68;
 
-        vec3 tirCeiling = mix(deepCrestPocket, midTealFacet, smoothstep(0.18, 0.56, facetSlope));
-        tirCeiling = mix(tirCeiling, brightAquaFacet, smoothstep(0.52, 0.86, facetSlope));
+      // 3) WAVE-BROKEN FRESNEL BLEND BETWEEN REFRACTED SKY & TIR CEILING:
+      // Instead of any hard circle, transmission increases smoothly with upward angle (rd.y)
+      // and local 3D wave slope, so individual wave facets shimmer between sky and reflection!
+      float localIncidence = rd.y + (N_surf.z * 0.22 + N_surf.x * 0.14) + (uwFbm2D(waveUV * 1.8 + uTime * 0.25) - 0.5) * 0.12;
+      float skyTrans = smoothstep(0.18, 0.62, localIncidence) * smoothstep(0.08, 0.32, rd.y);
 
-        // Modulate warm golden-coral sunlight directly into the steep 3D wave facets in the upper crown zone
-        // (winCoord.y > 0.18, rEff < 1.48) — crisp 3D wave-facet refraction, zero blurry grey smudge!
-        float crownZone = smoothstep(0.18, 0.58, winCoord.y)
-                        * exp(-uwSqr(winCoord.x * 0.72))
-                        * exp(-max(0.0, rEff - 0.99) * 2.25);
-        float sunFacet = smoothstep(0.46, 0.84, facetSlope) * crownZone;
-        vec3 warmCrownCol = mix(vec3(0.95, 0.58, 0.42), vec3(1.18, 0.76, 0.52), smoothstep(0.60, 0.90, facetSlope));
-        tirCeiling = mix(tirCeiling, warmCrownCol, sunFacet * 0.85);
+      vec3 combinedCeiling = mix(tirCeiling, waterFilteredSky, skyTrans * 0.82);
 
-        // Glossy silver-cyan specular ridge glints on the 3D wave undersides
-        vec3 L_up = normalize(vec3(0.0, -0.80, 0.60));
-        float ridgeSpec = uwSafePow(max(0.0, dot(N_under, normalize(L_up + V_under))), 38.0) * (0.35 + 0.65 * tirCaust);
-        tirCeiling += vec3(0.42, 0.82, 0.88) * ridgeSpec * 0.68;
+      // Deepen peripheral left/right horizon edges into rich underwater teal fog
+      float periphVignette = mix(0.32, 1.0, exp(-uwSqr(rd.x * 1.05)));
+      combinedCeiling *= periphVignette;
 
-        // Deepen the peripheral left/right ceiling edges (abs(rd.x) > 0.42) into rich abyssal teal
-        float periphVignette = mix(0.22, 1.0, exp(-uwSqr(rd.x * 1.18)));
-        tirCeiling *= periphVignette;
-
-        float ceilingVis = exp(-max(0.0, tSurf - 2.5) * 0.045);
-        vec3 tirFinal = mix(uWaterBg, tirCeiling, ceilingVis);
-
-        float outerBlend = smoothstep(0.975, 0.998, rEff);
-        ceilingCol = mix(ceilingCol, tirFinal, outerBlend);
-      }
-
-      baseUnderwater = ceilingCol;
+      float ceilingVis = exp(-max(0.0, tSurf - 2.2) * 0.048);
+      baseUnderwater = mix(uWaterBg, combinedCeiling, ceilingVis);
     }
 
     // ========================================================================

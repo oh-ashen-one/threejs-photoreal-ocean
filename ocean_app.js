@@ -1,8 +1,8 @@
 import * as THREE from './three.module.js';
-import { SKY_ATMOSPHERE_GLSL } from './modules/sky_atmosphere_glsl.js';
-import { OCEAN_SURFACE_GLSL } from './modules/ocean_surface_glsl.js';
-import { UNDERWATER_GLSL } from './modules/underwater_glsl.js';
-import { createFishSchoolSystem } from './modules/fish_school_system.js';
+import { SKY_ATMOSPHERE_GLSL } from './modules/sky_atmosphere_glsl.js?v=24';
+import { OCEAN_SURFACE_GLSL } from './modules/ocean_surface_glsl.js?v=24';
+import { UNDERWATER_GLSL } from './modules/underwater_glsl.js?v=24';
+import { createFishSchoolSystem } from './modules/fish_school_system.js?v=24';
 
 // ============================================================================
 // 1. RENDERER & CAMERA INITIALIZATION
@@ -307,12 +307,19 @@ if (urlParams.get('preset') && PRESETS[urlParams.get('preset')]) {
   camState.yaw = PRESETS[pName].yaw;
   camState.pitch = PRESETS[pName].pitch;
 }
+if (urlParams.get('pitch') !== null) {
+  const customPitch = parseFloat(urlParams.get('pitch'));
+  if (!Number.isNaN(customPitch)) {
+    camState.pitch = customPitch;
+    camState.targetPitch = customPitch;
+  }
+}
 if (urlParams.get('tod') !== null) {
   const tod = parseFloat(urlParams.get('tod'));
   document.getElementById('tod-slider').value = tod;
   updateTimeOfDay(tod);
 }
-if (urlParams.get('clean') === '1') {
+if (urlParams.get('clean') === '1' || urlParams.get('hideui') === '1') {
   document.body.classList.add('ui-hidden');
 }
 
