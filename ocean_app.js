@@ -1,8 +1,8 @@
 import * as THREE from './three.module.js';
-import { SKY_ATMOSPHERE_GLSL } from './modules/sky_atmosphere_glsl.js?v=24';
-import { OCEAN_SURFACE_GLSL } from './modules/ocean_surface_glsl.js?v=24';
-import { UNDERWATER_GLSL } from './modules/underwater_glsl.js?v=24';
-import { createFishSchoolSystem } from './modules/fish_school_system.js?v=24';
+import { SKY_ATMOSPHERE_GLSL } from './modules/sky_atmosphere_glsl.js?v=28';
+import { OCEAN_SURFACE_GLSL } from './modules/ocean_surface_glsl.js?v=28';
+import { UNDERWATER_GLSL } from './modules/underwater_glsl.js?v=28';
+import { createFishSchoolSystem } from './modules/fish_school_system.js?v=28';
 
 // ============================================================================
 // 1. RENDERER & CAMERA INITIALIZATION

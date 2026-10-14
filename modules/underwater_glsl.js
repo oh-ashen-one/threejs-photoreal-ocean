@@ -271,11 +271,27 @@ export const UNDERWATER_GLSL = /* glsl */ `
   }
 
   vec3 uwGetCeilingNormal(vec2 xz, float time, float chop) {
-    float eps = 0.038;
+    float eps = 0.042;
     float h0 = uwEvalCeilingWave(xz, time, chop);
     float hX = uwEvalCeilingWave(xz + vec2(eps, 0.0), time, chop);
     float hZ = uwEvalCeilingWave(xz + vec2(0.0, eps), time, chop);
     return normalize(vec3(h0 - hX, eps, h0 - hZ));
+  }
+
+  // Smooth long-wave swell normal for liquid-lens sky refraction (prevents noisy FBM contour islands in clouds)
+  vec3 uwGetSmoothRefractNormal(vec2 xz, float time, float chop) {
+    float cScale = max(0.35, chop);
+    float eps = 0.08;
+    float s0 = (sin(xz.y * 1.35 + xz.x * 0.28 - time * 1.95) * 0.145
+              + cos(xz.x * 1.55 - xz.y * 0.95 - time * 1.65) * 0.085
+              + sin(xz.y * 3.2 - time * 2.1) * 0.032) * cScale;
+    float sX = (sin(xz.y * 1.35 + (xz.x + eps) * 0.28 - time * 1.95) * 0.145
+              + cos((xz.x + eps) * 1.55 - xz.y * 0.95 - time * 1.65) * 0.085
+              + sin(xz.y * 3.2 - time * 2.1) * 0.032) * cScale;
+    float sZ = (sin((xz.y + eps) * 1.35 + xz.x * 0.28 - time * 1.95) * 0.145
+              + cos(xz.x * 1.55 - (xz.y + eps) * 0.95 - time * 1.65) * 0.085
+              + sin((xz.y + eps) * 3.2 - time * 2.1) * 0.032) * cScale;
+    return normalize(vec3(s0 - sX, eps, s0 - sZ));
   }
 
   // --------------------------------------------------------------------------
@@ -300,8 +316,8 @@ export const UNDERWATER_GLSL = /* glsl */ `
     vec3 baseUnderwater = uWaterBg;
     float sceneDist = 65.0;
 
-    vec3 upOrtho    = normalize(vec3(0.0, 0.898, 0.44));
-    vec3 rightOrtho = vec3(1.0, 0.0, 0.0);
+    // Refracted solar direction inside the water column (Snell's law bends low sun upward)
+    vec3 refractedSunDir = normalize(vec3(sunDir.x * 0.52, 0.58, -0.81));
 
     // ========================================================================
     // A. OVERHEAD WATER CEILING: CONTINUOUS 3D WAVE-REFRACTED SKY & TIR FACETS
@@ -315,40 +331,34 @@ export const UNDERWATER_GLSL = /* glsl */ `
       vec2 relXZ  = (surfHit.xz - ro.xz) / (1.0 + tSurf * 0.042);
       vec2 waveUV = ro.xz + relXZ;
       vec3 N_surf = uwGetCeilingNormal(waveUV * 1.12, uTime, uChop);
+      vec3 N_refract = uwGetSmoothRefractNormal(waveUV * 0.95, uTime, uChop);
 
-      // 1) TRUE WAVE-DISTORTED SKY REFRACTION OVERHEAD:
-      // Perturb the upward ray with the 3D overhead wave normal so the real sky,
-      // clouds, and stars ripple and undulate organically across the water ceiling.
-      vec3 wavePerturb = vec3(N_surf.x * 0.52, 0.0, N_surf.z * 0.52);
+      // 1) TRUE LIQUID-GLASS SKY REFRACTION OVERHEAD:
+      // Smooth gravity-swell refraction bends the above-water sky, volumetric clouds,
+      // and starfield across the undulating water ceiling without posterized noise islands.
       vec3 skyRay = normalize(vec3(
-        rd.x * 0.85 + wavePerturb.x,
-        max(0.068, rd.y * 0.58 + N_surf.z * 0.16),
-        rd.z * 0.85 + wavePerturb.z
+        rd.x * 0.85 + N_refract.x * 0.28,
+        max(0.095, rd.y * 0.72 + N_refract.z * 0.14 + 0.02),
+        rd.z * 0.85 + N_refract.z * 0.28
       ));
 
       vec3 dummySunDir, dummySunCol;
       vec3 rawSkyCol = evalSkyAndClouds(skyRay, uTime, uTwilight, dummySunDir, dummySunCol);
-      rawSkyCol += evalStarfield(skyRay, uTime) * smoothstep(0.35, 0.95, uTwilight) * 0.85;
+      rawSkyCol += evalStarfield(skyRay, uTime) * smoothstep(0.28, 0.90, uTwilight) * 1.35;
 
-      // Filter the refracted sky through crystalline turquoise-cyan marine water absorption
-      // so it blends naturally with the ocean ceiling instead of looking like dry red air
-      float skyLuma = dot(rawSkyCol, vec3(0.299, 0.587, 0.114));
-      vec3 waterFilteredSky = mix(
-        rawSkyCol * vec3(0.52, 0.86, 0.96),
-        vec3(0.16, 0.64, 0.78) * skyLuma + rawSkyCol * vec3(0.38, 0.58, 0.65),
-        0.48
-      );
+      // Preserve rich golden-coral cloud rims & deep twilight indigo while tinting through marine water
+      vec3 waterFilteredSky = rawSkyCol * vec3(0.72, 0.90, 0.98);
 
-      // Add shimmering caustic ripple highlights along the refracted wave crests
-      float tirCaust = uwCausticMono(waveUV * 0.88 + N_surf.xz * 0.42, uTime * 0.85);
-      waterFilteredSky += vec3(0.22, 0.68, 0.78) * tirCaust * 0.28;
+      // Add shimmering caustic ripple filaments across the undulating ceiling
+      float tirCaust = uwCausticMono(waveUV * 0.85 + N_surf.xz * 0.36, uTime * 0.85);
+      waterFilteredSky += vec3(0.22, 0.74, 0.86) * tirCaust * 0.28;
 
       // 2) 3D LIQUID-MERCURY TOTAL INTERNAL REFLECTION (TIR) WAVE UNDERSIDES:
       vec3 N_under = normalize(vec3(-N_surf.x * 2.55, -N_surf.y, -N_surf.z * 2.55));
       vec3 V_under = -rd;
 
-      float facetSlope = clamp(0.44 + N_surf.z * 2.95 + N_surf.x * 1.45, 0.0, 1.0);
-      vec3 deepCrestPocket = vec3(0.001, 0.014, 0.028);
+      float facetSlope = clamp(0.44 + N_surf.z * 2.85 + N_surf.x * 1.35, 0.0, 1.0);
+      vec3 deepCrestPocket = vec3(0.001, 0.016, 0.032);
       vec3 midTealFacet    = vec3(0.006, 0.165, 0.235);
       vec3 brightAquaFacet = mix(vec3(0.022, 0.38, 0.46), vec3(0.20, 0.74, 0.82), clamp(tirCaust * 0.80, 0.0, 1.0));
 
@@ -359,7 +369,7 @@ export const UNDERWATER_GLSL = /* glsl */ `
       vec2 horizRd = rd.xz / max(1e-4, length(rd.xz));
       float sunAlign = clamp(dot(horizRd, sunDir.xz), 0.0, 1.0);
       float sunFacet = smoothstep(0.52, 0.88, facetSlope) * smoothstep(0.05, 0.45, rd.y) * (0.35 + 0.65 * sunAlign);
-      vec3 warmWaveGlow = mix(vec3(0.25, 0.72, 0.78), sunCol * vec3(0.72, 0.82, 0.85), 0.55);
+      vec3 warmWaveGlow = mix(vec3(0.25, 0.72, 0.78), sunCol * vec3(0.82, 0.78, 0.70), 0.55);
       tirCeiling = mix(tirCeiling, warmWaveGlow, sunFacet * 0.55);
 
       // Glossy silver-cyan specular ridge glints on the 3D wave undersides
@@ -367,16 +377,17 @@ export const UNDERWATER_GLSL = /* glsl */ `
       float ridgeSpec = uwSafePow(max(0.0, dot(N_under, normalize(L_up + V_under))), 38.0) * (0.35 + 0.65 * tirCaust);
       tirCeiling += vec3(0.42, 0.82, 0.88) * ridgeSpec * 0.68;
 
-      // 3) WAVE-BROKEN FRESNEL BLEND BETWEEN REFRACTED SKY & TIR CEILING:
-      // Instead of any hard circle, transmission increases smoothly with upward angle (rd.y)
-      // and local 3D wave slope, so individual wave facets shimmer between sky and reflection!
-      float localIncidence = rd.y + (N_surf.z * 0.22 + N_surf.x * 0.14) + (uwFbm2D(waveUV * 1.8 + uTime * 0.25) - 0.5) * 0.12;
-      float skyTrans = smoothstep(0.18, 0.62, localIncidence) * smoothstep(0.08, 0.32, rd.y);
+      // 3) WAVE-FACETED FRESNEL BLEND BETWEEN REFRACTED SKY & 3D TIR WAVE POCKETS:
+      // Even when looking straight up, the steep wave backs retain 3D turquoise TIR pockets
+      // while the flatter wave windows transmit the golden clouds, twilight sky, and stars!
+      float waveWindow = smoothstep(0.22, 0.76, facetSlope);
+      float elevWindow = smoothstep(0.08, 0.34, rd.y);
+      float skyTrans   = elevWindow * (0.32 + 0.56 * waveWindow);
 
-      vec3 combinedCeiling = mix(tirCeiling, waterFilteredSky, skyTrans * 0.82);
+      vec3 combinedCeiling = mix(tirCeiling, waterFilteredSky, skyTrans);
 
       // Deepen peripheral left/right horizon edges into rich underwater teal fog
-      float periphVignette = mix(0.32, 1.0, exp(-uwSqr(rd.x * 1.05)));
+      float periphVignette = mix(0.36, 1.0, exp(-uwSqr(rd.x * 1.05)));
       combinedCeiling *= periphVignette;
 
       float ceilingVis = exp(-max(0.0, tSurf - 2.2) * 0.048);
@@ -464,19 +475,25 @@ export const UNDERWATER_GLSL = /* glsl */ `
     accumGodRays /= 10.0;
     accumPlume   /= 10.0;
 
-    vec2 winRay = vec2(dot(rd, rightOrtho), dot(rd, upOrtho) + 0.012);
-    float rBeam = length(winRay);
-    float angBeam = atan(winRay.y, winRay.x);
-    float angDiff = abs(angBeam + 1.5707963) / 0.88;
-    float downwardFan = (1.0 - smoothstep(-0.08, 0.05, winRay.y)) * exp(-uwSqr(angDiff) * 1.65);
-    float radialFade  = smoothstep(0.12, 0.25, rBeam) * exp(-max(0.0, rBeam - 0.20) * 2.5);
+    // Volumetric sunbeams stream downward through the water column (rd.y < 0.34)
+    // and fade smoothly into the overhead wave ceiling without any pinch point!
+    vec3 beamOrigin = normalize(vec3(0.0, 0.46, -0.888));
+    vec3 beamUp     = normalize(vec3(0.0, 0.888, 0.46));
+    vec2 winRay     = vec2(rd.x, dot(rd, beamUp));
+    float rBeam     = length(winRay);
+    float angBeam   = atan(winRay.y, winRay.x);
+    float angDiff   = abs(angBeam + 1.5707963) / 0.90;
+    float downwardFan = (1.0 - smoothstep(-0.06, 0.04, winRay.y))
+                      * (1.0 - smoothstep(0.22, 0.38, rd.y))
+                      * exp(-uwSqr(angDiff) * 1.55);
+    float radialFade  = smoothstep(0.14, 0.28, rBeam) * exp(-max(0.0, rBeam - 0.22) * 2.4);
 
-    float rayS1 = 0.5 + 0.5 * sin(angBeam * 28.0 + uTime * 0.4 + sin(angBeam * 13.0));
-    float rayS2 = 0.5 + 0.5 * sin(angBeam * 64.0 - uTime * 0.55 + cos(angBeam * 21.0));
-    float radialBeams = uwSafePow(clamp(rayS1 * 0.55 + rayS2 * 0.45, 0.0, 1.0), 3.2) * downwardFan * radialFade;
+    float rayS1 = 0.5 + 0.5 * sin(angBeam * 26.0 + uTime * 0.4 + sin(angBeam * 12.0));
+    float rayS2 = 0.5 + 0.5 * sin(angBeam * 58.0 - uTime * 0.55 + cos(angBeam * 20.0));
+    float radialBeams = uwSafePow(clamp(rayS1 * 0.55 + rayS2 * 0.45, 0.0, 1.0), 3.1) * downwardFan * radialFade;
 
     vec3 godRayColor = mix(vec3(0.24, 0.72, 0.82), vec3(0.75, 0.88, 0.86), 0.35);
-    baseUnderwater += godRayColor * (accumGodRays * 0.58 + radialBeams * 0.30);
+    baseUnderwater += godRayColor * (accumGodRays * 0.62 + radialBeams * 0.28);
 
     // Shimmering turbulent bubble plume & aerated micro-bubble curtain in the upper-right sunbeams
     vec3 plumeColor = mix(vec3(0.32, 0.72, 0.82), vec3(0.88, 0.96, 0.98), clamp(accumPlume * 1.6, 0.0, 1.0));
