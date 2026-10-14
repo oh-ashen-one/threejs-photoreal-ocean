@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photorealistic Three.js Ocean — Shoreline, Volumetric Clouds, Stars & Underwater Snell's Window</title>
+  <style>
+    :root {
+      --glass: rgba(8, 15, 26, 0.72);
+      --glass-strong: rgba(6, 12, 22, 0.88);
+      --border: rgba(255, 255, 255, 0.14);
+      --accent: #2dd4bf;
+      --accent-gold: #fbbf24;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #040811;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      color: var(--text);
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      cursor: grab;
+    }
+
+    #canvas-container:active {
+      cursor: grabbing;
+    }
+
+    /* Minimal Cinematic HUD */
+    .hud-top {
+      position: fixed;
+      top: 18px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 20;
+      gap: 16px;
+      transition: opacity 0.35s ease;
+    }
+
+    .hud-bottom {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      z-index: 20;
+      pointer-events: auto;
+      background: var(--glass);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 10px 16px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+      transition: opacity 0.35s ease;
+    }
+
+    body.ui-hidden .hud-top,
+    body.ui-hidden .hud-bottom,
+    body.ui-hidden .ref-drawer,
+    body.ui-hidden .controls-hint {
+      display: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    .title-card {
+      pointer-events: auto;
+      background: var(--glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 18px;
+      max-width: 460px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .title-card h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .title-card p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .status-pills {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      background: var(--glass);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pill strong {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* Buttons & Sliders */
+    button {
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.28);
+      transform: translateY(-1px);
+    }
+
+    button.active {
+      background: rgba(45, 212, 191, 0.22);
+      border-color: var(--accent);
+      color: #5eead4;
+      box-shadow: 0 0 18px rgba(45, 212, 191, 0.22);
+    }
+
+    button.dive-cta {
+      background: linear-gradient(135deg, #0d9488, #0284c7);
+      border-color: rgba(94, 234, 212, 0.55);
+      color: #ffffff;
+      padding: 9px 18px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 4px 20px rgba(13, 148, 136, 0.45);
+    }
+
+    button.dive-cta:hover {
+      background: linear-gradient(135deg, #14b8a6, #0369a1);
+      box-shadow: 0 6px 24px rgba(20, 184, 166, 0.65);
+    }
+
+    .divider {
+      width: 1px;
+      height: 26px;
+      background: var(--border);
+      margin: 0 2px;
+    }
+
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 6px;
+    }
+
+    .slider-group label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 125px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--accent-gold);
+      border: 2px solid #fff;
+      box-shadow: 0 0 8px rgba(251, 191, 36, 0.8);
+    }
+
+    /* Reference Drawer */
+    .ref-drawer {
+      position: fixed;
+      top: 90px;
+      right: 20px;
+      width: 340px;
+      background: var(--glass-strong);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      z-index: 25;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+    }
+
+    .ref-drawer.open {
+      display: flex;
+    }
+
+    .ref-drawer h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ref-card {
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .ref-card img {
+      width: 100%;
+      display: block;
+    }
+
+    .ref-card span {
+      display: block;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    /* Subtle Hint Toast */
+    .controls-hint {
+      position: fixed;
+      bottom: 84px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(6, 12, 22, 0.65);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      color: #cbd5e1;
+      pointer-events: none;
+      z-index: 15;
+      transition: opacity 0.4s ease;
+    }
+
+    body.ui-hidden .controls-hint {
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+
+  <!-- Top HUD -->
+  <div class="hud-top">
+    <div class="title-card">
+      <div class="title-row">
+        <span class="live-dot"></span>
+        <h1>Three.js Photoreal Ocean, Volumetric Sky & Underwater World</h1>
+      </div>
+      <p>Drag to look around • Scroll or <strong>W/S/E/Q</strong> to move & dive • Click <strong>Dive Underwater</strong> to submerge beneath the breakers and look up through Snell's Window at the clouds & stars.</p>
+    </div>
+
+    <div class="status-pills">
+      <div class="pill">Depth: <strong id="depth-readout">+1.24 m (Above Water)</strong></div>
+      <div class="pill">Fish: <strong id="fish-count">415 Instanced 3D</strong></div>
+      <button onclick="toggleRefDrawer()" id="btn-ref">🖼 AI Target Refs</button>
+      <button onclick="toggleUI()" title="Press H to toggle HUD">👁 Hide HUD (H)</button>
+    </div>
+  </div>
+
+  <!-- Collapsible AI Reference Images Drawer -->
+  <div class="ref-drawer" id="ref-drawer">
+    <h3>
+      <span>Built-In Image Gen Targets (V2 8K)</span>
+      <button onclick="toggleRefDrawer()" style="padding:2px 7px;font-size:11px;">✕</button>
+    </h3>
+    <div class="ref-card">
+      <img src="./references/ref_v2_hyperreal_wave_shore.jpg" alt="Beach Shoreline Target V2" />
+      <span>Target 1: 8K Beach Shoreline (Asymmetric Plunging Wave, Voronoi Foam & Headland)</span>
+    </div>
+    <div class="ref-card">
+      <img src="./references/ref_v2_hyperreal_underwater_snell.jpg" alt="Underwater Snell's Window Target V2" />
+      <span>Target 2: 8K Underwater Snell's Window, Chromatic Caustics & 415 Fusiliers</span>
+    </div>
+  </div>
+
+  <div class="controls-hint" id="controls-hint">
+    Mouse Drag: Look Around • Scroll / Up-Down: Adjust Elevation • Space: Dive / Surface • H: Toggle Clean Video View
+  </div>
+
+  <!-- Bottom Control Bar -->
+  <div class="hud-bottom">
+    <button class="dive-cta" id="btn-dive-toggle" onclick="toggleDiveMode()">
+      🤿 Dive Underwater & Look Up
+    </button>
+
+    <div class="divider"></div>
+
+    <button class="cam-preset active" id="preset-shore" onclick="setCameraPreset('shore')">🏖 Beach Shoreline</button>
+    <button class="cam-preset" id="preset-snell" onclick="setCameraPreset('snell')">🫧 Underwater (Snell's Window + Fish)</button>
+    <button class="cam-preset" id="preset-split" onclick="setCameraPreset('split')">🌊 Split Waterline</button>
+    <button class="cam-preset" id="preset-reef" onclick="setCameraPreset('reef')">🐠 Deep Fish School</button>
+
+    <div class="divider"></div>
+
+    <div class="slider-group">
+      <label for="tod-slider" id="tod-label">🌅 Twilight</label>
+      <input type="range" id="tod-slider" min="0" max="1" step="0.005" value="0.48" oninput="updateTimeOfDay(this.value)" />
+    </div>
+
+    <div class="slider-group">
+      <label for="wave-slider">🌊 Chop</label>
+      <input type="range" id="wave-slider" min="0.4" max="1.6" step="0.02" value="1.0" oninput="updateWaveScale(this.value)" style="width:85px;" />
+    </div>
+  </div>
+
+  <script type="module" src="./ocean_app.js?v=23"></script>
+</body>
+</html>
